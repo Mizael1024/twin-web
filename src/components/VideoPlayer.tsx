@@ -1,104 +1,107 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
-import { Volume2, VolumeX, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import { Volume2, VolumeX } from 'lucide-react';
 
 interface VideoPlayerProps {
   src: string;
   isVisible: boolean;
+  isFirstVideo?: boolean;
 }
 
-export default function VideoPlayer({ src, isVisible }: VideoPlayerProps) {
+export default function VideoPlayer({ src, isVisible, isFirstVideo = false }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const [isMuted, setIsMuted] = useState(true);
-  const { user } = useAuth();
-  const navigate = useNavigate();
+  const [isMuted, setIsMuted] = useState(isFirstVideo);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    if (Hls.isSupported()) {
+      initializeHls();
+    }
 
-    const initializeVideo = async () => {
-      try {
-        if (Hls.isSupported()) {
-          // Limpar instância anterior do HLS se existir
-          if (hlsRef.current) {
-            hlsRef.current.destroy();
-          }
-
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-          });
-
-          hlsRef.current = hls;
-          hls.loadSource(src);
-          hls.attachMedia(video);
-
-          return new Promise<void>((resolve) => {
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              if (isVisible) {
-                video.play().catch(() => {
-                  console.log('Autoplay prevented');
-                });
-              }
-              resolve();
-            });
-          });
-        }
-
-        // Fallback para navegadores que suportam HLS nativamente (Safari)
-        video.src = src;
-        if (isVisible) {
-          await video.play().catch(() => {
-            console.log('Autoplay prevented');
-          });
-        }
-      } catch (error) {
-        console.error('Error initializing video:', error);
-      }
-    };
-
-    initializeVideo();
-
-    // Cleanup
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
-        hlsRef.current = null;
       }
     };
+  }, []);
+
+  const initializeHls = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+    }
+
+    const hls = new Hls({
+      enableWorker: true,
+      startLevel: -1,
+      autoStartLoad: true,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 600,
+      maxBufferSize: 60 * 1000 * 1000,
+      manifestLoadingTimeOut: 10000,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 10000,
+      levelLoadingMaxRetry: 3,
+    });
+
+    hlsRef.current = hls;
+    hls.loadSource(src);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setIsReady(true);
+      if (isVisible) {
+        setTimeout(() => {
+          video.play()
+            .catch((error) => {
+              console.error('Erro ao reproduzir vídeo:', error);
+            });
+        }, 100);
+      }
+    });
+
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        console.error('Erro fatal HLS:', data);
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls.recoverMediaError();
+            break;
+          default:
+            hls.destroy();
+            initializeHls();
+            break;
+        }
+      }
+    });
   }, [src, isVisible]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !isReady) return;
 
-    const handleVisibilityChange = async () => {
-      try {
-        if (isVisible) {
-          video.currentTime = 0;
-          await video.play().catch(() => {
-            console.log('Playback prevented');
-          });
-        } else {
-          video.pause();
-        }
-      } catch (error) {
-        console.error('Error handling visibility change:', error);
-      }
-    };
-
-    handleVisibilityChange();
-  }, [isVisible]);
+    if (isVisible) {
+      video.play()
+        .catch((error) => {
+          console.error('Erro ao reproduzir vídeo:', error);
+        });
+    } else {
+      video.pause();
+      video.currentTime = 0;
+    }
+  }, [isVisible, isReady]);
 
   const toggleMute = () => {
-    if (!videoRef.current) return;
-    
-    videoRef.current.muted = !videoRef.current.muted;
-    setIsMuted(!isMuted);
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+      setIsMuted(!isMuted);
+    }
   };
 
   return (
@@ -109,36 +112,20 @@ export default function VideoPlayer({ src, isVisible }: VideoPlayerProps) {
         playsInline
         loop
         muted={isMuted}
+        autoPlay
+        preload="auto"
       />
       
-      {/* User Profile Button */}
       <button
-        type="button"
-        onClick={() => navigate(user ? '/profile' : '/auth')}
-        className="absolute top-6 left-6 z-10 bg-black/50 hover:bg-black/70 p-3 rounded-full transition-all transform hover:scale-110"
-      >
-        <User className="w-7 h-7 text-white" />
-      </button>
-
-      {/* Volume Control */}
-      <button
-        type="button"
         onClick={toggleMute}
-        className="absolute top-6 right-6 z-10 bg-black/50 hover:bg-black/70 p-3 rounded-full transition-all transform hover:scale-110"
+        className="absolute bottom-4 right-4 p-2 bg-black/50 rounded-full hover:bg-black/70 transition-colors"
+        type="button"
       >
         {isMuted ? (
-          <VolumeX className="w-7 h-7 text-white" />
+          <VolumeX className="w-6 h-6 text-white" />
         ) : (
-          <Volume2 className="w-7 h-7 text-white" />
+          <Volume2 className="w-6 h-6 text-white" />
         )}
-      </button>
-
-      <button
-        type="button"
-        className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-all hover:scale-105 hover:shadow-xl w-4/5 max-w-md text-lg"
-        onClick={() => navigate('/auth')}
-      >
-        Unlock Now
       </button>
     </div>
   );

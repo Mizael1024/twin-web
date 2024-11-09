@@ -14,7 +14,7 @@ export default function AdminPage() {
 
   const loadVideos = async () => {
     try {
-      const fetchedVideos = await videoService.getVideos('p0');
+      const fetchedVideos = await videoService.getVideos();
       setVideos(fetchedVideos);
     } catch (error) {
       console.error('Erro ao carregar vídeos:', error);

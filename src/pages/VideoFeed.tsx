@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import VideoPlayer from '../components/VideoPlayer';
 import { videoService, type Video } from '../services/videoService';
+import Hls from 'hls.js';
 
 interface VideoContainerProps {
   video: Video;
   onInView: () => void;
+  isNext?: boolean;
 }
 
-function VideoContainer({ video, onInView }: VideoContainerProps) {
+function VideoContainer({ video, onInView, isNext = false }: VideoContainerProps) {
   const { ref, inView } = useInView({
-    threshold: 0.7,
+    threshold: 0.5,
+    initialInView: true,
     onChange: (inView) => {
       if (inView) {
         onInView();
@@ -21,11 +24,11 @@ function VideoContainer({ video, onInView }: VideoContainerProps) {
   return (
     <div 
       ref={ref}
-      className="h-screen w-full snap-start snap-always"
+      className="h-screen w-full snap-start snap-always relative bg-black"
     >
       <VideoPlayer
         src={video.src}
-        isVisible={inView}
+        isVisible={inView || isNext}
       />
     </div>
   );
@@ -35,6 +38,7 @@ export default function VideoFeed() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
     loadVideos();
@@ -54,6 +58,29 @@ export default function VideoFeed() {
       setLoading(false);
     }
   };
+
+  // Otimizar o preload do próximo vídeo
+  useEffect(() => {
+    if (currentIndex < videos.length - 1) {
+      const nextVideo = videos[currentIndex + 1];
+      const preloadVideo = document.createElement('video');
+      
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 600,
+        });
+        hls.loadSource(nextVideo.src);
+        hls.attachMedia(preloadVideo);
+        
+        // Limpar recursos quando não for mais necessário
+        return () => {
+          hls.destroy();
+        };
+      }
+    }
+  }, [currentIndex, videos]);
 
   if (loading) {
     return (
@@ -81,11 +108,12 @@ export default function VideoFeed() {
 
   return (
     <div className="h-screen overflow-y-scroll snap-y snap-mandatory">
-      {videos.map((video) => (
+      {videos.map((video, index) => (
         <VideoContainer
           key={video.id}
           video={video}
-          onInView={() => console.log('Video em view:', video.src)}
+          onInView={() => setCurrentIndex(index)}
+          isNext={index === currentIndex + 1}
         />
       ))}
     </div>

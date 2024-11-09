@@ -1,18 +1,17 @@
 import { videosApi } from '../api/videos';
 
 export interface Video {
-  title: string;
   id: string;
   src: string;
   created_at: Date;
-  user_id?: string | null;
+  title?: string;
 }
 
 export const videoService = {
-  async getVideos(userId?: string): Promise<Video[]> {
+  async getVideos(): Promise<Video[]> {
     try {
       console.log('📊 [VideoService] Buscando vídeos...');
-      const videos = await videosApi.getVideos(userId);
+      const videos = await videosApi.getVideos();
       console.log('✅ [VideoService] Vídeos encontrados:', videos.length);
       return videos;
     } catch (error) {
